@@ -21,6 +21,8 @@ class TrainDataset(Dataset):
         self.transform_list = ['clear', 'snow', 'fog', 'rain', 'gauss_noise', 'ISO_noise', 'impulse_noise', 'resampling_blur', 
                                'motion_blur', 'zoom_blur', 'color_jitter', 'compression', 'elastic_transform',
                                'frosted_glass_blur', 'brightness', 'contrast' ]
+
+        self.transform_list = ['snow']
         
         self.training_size = (training_size, training_size)
         self.num_points = opt.num_points
