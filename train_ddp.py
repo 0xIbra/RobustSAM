@@ -25,9 +25,11 @@ from engine import train, validate
 
 from robust_segment_anything import SamPredictor, sam_model_registry
 from robust_segment_anything import SamAutomaticMaskGenerator, sam_model_registry
-from robust_segment_anything.utils.transforms import ResizeLongestSide 
+from robust_segment_anything.utils.transforms import ResizeLongestSide
 
 from dataset import TrainDataset
+
+from collate_fn import custom_collate  # Add this import at the top
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--batch_size', type=int, default=2, help='training batch size')
@@ -83,7 +85,7 @@ parser.add_argument(
 
 opt = parser.parse_args()
 
-def main(opt):   
+def main(opt):
     if opt.exp_name == "":
         print('Please enter the experiment name!!!')
         # breakpoint()
@@ -109,7 +111,7 @@ def main(opt):
         # Simply call main_worker function
         main_worker(opt.gpu, ngpus_per_node, opt)
 
-def main_worker(gpu, ngpus_per_node, opt):  
+def main_worker(gpu, ngpus_per_node, opt):
 
     opt.gpu = gpu
 
@@ -121,37 +123,37 @@ def main_worker(gpu, ngpus_per_node, opt):
         builtins.print = print_pass
 
     # if opt.gpu is not None:
-    #     print("Use GPU: {} for training".format(opt.gpu))        
+    #     print("Use GPU: {} for training".format(opt.gpu))
 
     if opt.distributed:
         if opt.multiprocessing_distributed:
             # For multiprocessing distributed training, rank needs to be the
             # global rank among all the processes
             opt.local_rank = opt.local_rank * ngpus_per_node + gpu
-            
+
         dist.init_process_group(
             backend=opt.dist_backend,
             world_size=opt.world_size,
             rank=opt.local_rank,
-        )    
-        
+        )
+
     train_flag = False
-    
+
     if opt.continue_training:
-        model_sam_path = '{}/{}_best.pth'.format(opt.save_dir, opt.exp_name)        
-        train_flag = True         
+        model_sam_path = '{}/{}_best.pth'.format(opt.save_dir, opt.exp_name)
+        train_flag = True
         print('Using pretrained checkpoint. Model Path: {} ...'.format(model_sam_path))
-    
+
     elif opt.load_model is not None:
         model_sam_path = opt.load_model
-        train_flag = True         
+        train_flag = True
         print('Using pretrained checkpoint. Model Path: {} ...'.format(model_sam_path))
-        
-    else: 
+
+    else:
         model_sam_path = None
         print('Train from scratch ... ')
-        
-    model = sam_model_registry["vit_{}".format(opt.model_size)](opt=opt, checkpoint=model_sam_path, train=train_flag)    
+
+    model = sam_model_registry["vit_{}".format(opt.model_size)](opt=opt, checkpoint=model_sam_path, train=train_flag)
 
     if opt.distributed:
         # For multiprocessing distributed, DistributedDataParallel constructor
@@ -175,75 +177,91 @@ def main_worker(gpu, ngpus_per_node, opt):
             )
             # DistributedDataParallel will divide and allocate batch_size to all
             # available GPUs if device_ids are not set
-           
+
     elif opt.gpu is not None:
         torch.cuda.set_device(opt.gpu)
         model.cuda(opt.gpu)
         # comment out the following line for debugging
         raise NotImplementedError("Only DistributedDataParallel is supported.")
-    
+
     else:
         model.cuda()
         # AllGather implementation (batch shuffle, queue update, etc.) in
         # this code only supports DistributedDataParallel.
-        raise NotImplementedError("Only DistributedDataParallel is supported.")              
-   
+        raise NotImplementedError("Only DistributedDataParallel is supported.")
+
     train_set = TrainDataset(opt=opt, mode='train')
     val_set = TrainDataset(opt=opt, mode='val')
-    
+
     if opt.distributed:
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_set)
         val_sampler = torch.utils.data.distributed.DistributedSampler(val_set)
-        
+
     else:
         train_sampler = None
         val_sampler = None
 
-    train_loader = DataLoader(train_set, batch_size=opt.batch_size, shuffle=(train_sampler is None),        
-                              num_workers=opt.workers, pin_memory=True, sampler=train_sampler, drop_last=True)
-    val_loader = DataLoader(val_set, batch_size=opt.batch_size, shuffle=(val_sampler is None),
-                            num_workers=opt.workers, pin_memory=True, sampler=val_sampler, drop_last=True)
+    train_loader = DataLoader(
+        train_set,
+        batch_size=opt.batch_size,
+        shuffle=(train_sampler is None),
+        num_workers=opt.workers,
+        pin_memory=True,
+        sampler=train_sampler,
+        drop_last=True,
+        collate_fn=custom_collate  # Use the custom collate function
+    )
+    val_loader = DataLoader(
+        val_set,
+        batch_size=opt.batch_size,
+        shuffle=(val_sampler is None),
+        num_workers=opt.workers,
+        pin_memory=True,
+        sampler=val_sampler,
+        drop_last=True,
+        collate_fn=custom_collate  # Use the custom collate function
+    )
 
     optimizer = optim.Adam(model.parameters(), lr=opt.lr, weight_decay=1e-5)
     lr_scheduler = optim.lr_scheduler.StepLR(optimizer, 10)
     best_loss = 9999.
-    
+
     try:
         sam_transform = ResizeLongestSide(model.module.image_encoder.img_size)
-        
-    except: 
+
+    except:
         sam_transform = ResizeLongestSide(model.image_encoder.img_size)
 
     print(opt)
     print('====================Start training======================')
     print('Model checkpoint will be saved to {} ... '.format(opt.save_dir))
     os.makedirs(opt.save_dir, exist_ok=True)
-    
-    for epoch in range(1, opt.epochs + 1):  
-        print('Epoch {} ...'.format(epoch))  
-            
+
+    for epoch in range(1, opt.epochs + 1):
+        print('Epoch {} ...'.format(epoch))
+
         print('==> Training')
-        train(opt, epoch, optimizer, train_loader, sam_transform, model) 
+        train(opt, epoch, optimizer, train_loader, sam_transform, model)
 
         if opt.gpu == 0:
             print('==> Validation')
             val_loss = validate(opt, epoch, val_loader, sam_transform, model)
-        
+
             print('Validation loss:{}'.format(val_loss))
             print('Best val loss so far: {}'.format(best_loss))
-    
+
             if val_loss < best_loss:
                 best_loss = val_loss
                 print('Loss is lowest in epoch {}'.format(epoch))
                 model_saved_path = '{}/{}_best.pth'.format(opt.save_dir, opt.exp_name)
-                torch.save(model.state_dict(), model_saved_path)  
-                print('Current best model checkpoint saved to {}'.format(model_saved_path)) 
-    
-    if opt.gpu == 0:          
+                torch.save(model.state_dict(), model_saved_path)
+                print('Current best model checkpoint saved to {}'.format(model_saved_path))
+
+    if opt.gpu == 0:
         print('Training complete! Saving last model!')
         model_saved_path = '{}/{}_last.pth'.format(opt.save_dir, opt.exp_name)
-        torch.save(model.state_dict(), model_saved_path) 
-        print('Last model saved to {}'.format(model_saved_path)) 
+        torch.save(model.state_dict(), model_saved_path)
+        print('Last model saved to {}'.format(model_saved_path))
 
 if __name__ == "__main__":
     main(opt)
