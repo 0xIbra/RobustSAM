@@ -63,6 +63,8 @@ class TrainDataset(Dataset):
 
     def get_all_masks(self, all_mask, output_size=None):
         masks = []
+        print("[DEBUG] all_mask: ", len(all_mask))
+        print("[DEBUG] all_mask[0]: ", len(all_mask[0]))
         for i, mask in enumerate(all_mask):
             o_mask = np.transpose(mask, (1, 2, 0))
             if output_size is not None:
