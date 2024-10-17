@@ -59,34 +59,48 @@ class TrainDataset(Dataset):
 
         return output_mask
 
-    def get_prompt(self, mask, num_points):                
-        input_point, input_label = [], []
-        index = np.where(mask == True)
-        y_coord_np = index[0]
-        x_coord_np = index[1]
-        index_list = range(0, len(x_coord_np))        
-        
-        if len(x_coord_np) < num_points:
-            for i in range(len(x_coord_np)):
-                coord = [x_coord_np[i], y_coord_np[i]]
-                input_point.append(coord)
-                input_label.append(1)
-                
-            while(len(input_point) < num_points):
-                if len(x_coord_np) != 0:
-                    input_point.append(coord)
-                
-                else:
-                    input_point.append([256, 256])
-                               
-                input_label.append(1)
+    def get_all_masks(self, all_mask, output_size=None):
+        masks = []
+        for i, mask in enumerate(all_mask):
+            o_mask = np.transpose(mask, (1, 2, 0))
+            if output_size is not None:
+                o_mask = cv2.resize(o_mask.astype(np.uint8), output_size)
             
-        else:
-            index = random.sample(index_list, num_points)                           
-            for i in index:
-                coord = [x_coord_np[i], y_coord_np[i]]
-                input_point.append(coord)
-                input_label.append(1)   
+            masks.append(o_mask)
+
+        return masks
+
+
+    def get_prompt(self, masks, num_points):                
+        input_point, input_label = [], []
+
+        for mask in masks:
+            index = np.where(mask == True)
+            y_coord_np = index[0]
+            x_coord_np = index[1]
+            index_list = range(0, len(x_coord_np))        
+            
+            if len(x_coord_np) < num_points:
+                for i in range(len(x_coord_np)):
+                    coord = [x_coord_np[i], y_coord_np[i]]
+                    input_point.append(coord)
+                    input_label.append(1)
+                    
+                while(len(input_point) < num_points):
+                    if len(x_coord_np) != 0:
+                        input_point.append(coord)
+                    
+                    else:
+                        input_point.append([256, 256])
+                                
+                    input_label.append(1)
+                
+            else:
+                index = random.sample(index_list, num_points)                           
+                for i in index:
+                    coord = [x_coord_np[i], y_coord_np[i]]
+                    input_point.append(coord)
+                    input_label.append(1)   
         
         input_point = np.array(input_point, dtype=np.float32)
         input_label = np.array(input_label, dtype=np.float32)   
@@ -108,12 +122,10 @@ class TrainDataset(Dataset):
         degraded_im = self.get_im(degraded_path)             
         
         all_mask = np.load(self.mask_list[idx]) # npy file with all masks inside specific image      
-        mask = self.get_largest_mask(all_mask, output_size=self.training_size) 
+        # mask = self.get_largest_mask(all_mask, output_size=self.training_size) 
+
+        all_mask = np.array(self.get_all_masks(all_mask, output_size=self.training_size))
         
-        input_point, input_label = self.get_prompt(mask, self.num_points)                       
+        input_point, input_label = self.get_prompt(all_mask, self.num_points)
 
-        return clear_im, degraded_im, clear_path, mask, input_point, input_label
-
-
-
-    
+        return clear_im, degraded_im, clear_path, all_mask, input_point, input_label

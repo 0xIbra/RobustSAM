@@ -41,7 +41,7 @@ def train(opt, epoch, optimizer, train_loader, sam_transform, model):
             data_dict['original_size'] = all_im.shape[-2:]                
             batched_input.append(data_dict)
         
-        batched_output = model(opt, batched_input, multimask_output=False, return_logits=True) 
+        batched_output = model(opt, batched_input, multimask_output=True, return_logits=True) 
 
         degraded_index = int(0.5 * len(batched_input))         
 

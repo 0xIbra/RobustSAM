@@ -64,6 +64,10 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--local-rank", default=0, type=int, help="node rank for distributed training"
+)
+
+parser.add_argument(
     "--dist-backend", default="nccl", type=str, help="distributed backend"
 )
 
